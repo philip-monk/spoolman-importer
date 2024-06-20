@@ -1,4 +1,4 @@
-# Spoolman-filament-extractor 🎉
+# Spoolman Importer 🎉
 
 Python script to manage your filaments in a [SpoolmanDB](https://github.com/Donkie/SpoolmanDB) format, facilitating the creation and maintenance of a comprehensive and centralized filament database. This database is used in [Spoolman](https://github.com/Donkie/Spoolman) by [Donkie](https://github.com/Donkie).
 
