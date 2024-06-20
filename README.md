@@ -37,8 +37,8 @@ docker run --env-file .env ghcr.io/fwartner/spoolman-importer:main delete
 1. Clone the repository and install dependencies:
 
 ```bash
-git clone <repo_url>
-cd <repo_directory>
+git clone https://github.com/fwartner/spoolman-importer.git
+cd spoolman-importer
 pip install -r requirements.txt
 ```
 
