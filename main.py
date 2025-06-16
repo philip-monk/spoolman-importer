@@ -20,12 +20,11 @@ def create_filament(filament):
     return response
 
 # Function to send POST request to create a vendor
-def create_vendor(vendor_name):
+def create_vendor(vendor):
     url = f"{spoolman_url}/api/v1/vendor"
     headers = {
         'Content-Type': 'application/json'
     }
-    vendor = {"name": vendor_name}
     response = requests.post(url, headers=headers, data=json.dumps(vendor))
     return response
 
@@ -58,12 +57,13 @@ def delete_filament(filament_id):
 # Function to create vendors and filaments
 def create_data():
     # URL to fetch the JSON data
-    data_url = "https://donkie.github.io/SpoolmanDB/filaments.json"
+    filaments_data_url = "https://donkie.github.io/SpoolmanDB/filaments.json"
+    manufacturers_data_url = "https://donkie.github.io/SpoolmanDB/manufacturers.json"
 
-    # Fetch the data from the provided URL
+    # Fetch the filament data from the provided URL
     print("Fetching filament data from SpoolmanDB...")
     try:
-        response = requests.get(data_url)
+        response = requests.get(filaments_data_url)
         response.raise_for_status()  # Check if the request was successful
         filaments_data = response.json()
         print(f"Found {len(filaments_data)} filament definitions.")
@@ -73,8 +73,16 @@ def create_data():
 
     # --- Vendor Processing ---
     print("Processing vendors...")
-    # Get all unique manufacturer names from the data
-    required_vendors = {item["manufacturer"] for item in filaments_data if "manufacturer" in item}
+    # Fetch the manufacturer data from the provided URL
+    print("Fetching manufacturer data from SpoolmanDB...")
+    try:
+        response = requests.get(manufacturers_data_url)
+        response.raise_for_status()
+        manufacturers_data = response.json()
+        print(f"Found {len(manufacturers_data)} manufacturer definitions.")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching manufacturer data from source URL: {e}")
+        return
 
     # Get all existing vendors from Spoolman
     try:
@@ -86,14 +94,22 @@ def create_data():
         return
 
     # Determine which vendors need to be created
-    vendors_to_create = required_vendors - existing_vendor_names
+    vendors_to_create = [
+        vendor for vendor in manufacturers_data
+        if vendor.get("name") and vendor["name"] not in existing_vendor_names
+    ]
 
     # Create all missing vendors
     vendor_creation_results = {"created": 0, "failed": 0}
     if vendors_to_create:
         print(f"Creating {len(vendors_to_create)} new vendors...")
-        for vendor_name in vendors_to_create:
-            response = create_vendor(vendor_name)
+        for vendor_data in vendors_to_create:
+            vendor_name = vendor_data["name"]
+            vendor_payload = {
+                "name": vendor_name,
+                "comment": vendor_data.get("url")  # Add URL to comment field
+            }
+            response = create_vendor(vendor_payload)
             if 200 <= response.status_code < 300:
                 vendor_creation_results["created"] += 1
             else:
