@@ -3,7 +3,6 @@ import json
 import os
 import argparse
 from dotenv import load_dotenv
-from jsonschema import validate, ValidationError
 
 # Load environment variables from .env file
 load_dotenv()
@@ -34,16 +33,20 @@ def create_vendor(vendor_name):
 def get_vendor_by_name(vendor_name):
     url = f"{spoolman_url}/api/v1/vendor"
     response = requests.get(url, params={"name": vendor_name})
-    if response.status_code == 200 and response.json():
-        return response.json()[0]  # Assuming the API returns a list of matching vendors
+    if response.status_code == 200:
+        data = response.json()
+        if data:  # Check if the list is not empty
+            return data[0]
     return None
 
 # Function to get a filament by name
 def get_filament_by_name(filament_name):
     url = f"{spoolman_url}/api/v1/filament"
     response = requests.get(url, params={"name": filament_name})
-    if response.status_code == 200 and response.json():
-        return response.json()[0]  # Assuming the API returns a list of matching filaments
+    if response.status_code == 200:
+        data = response.json()
+        if data:  # Check if the list is not empty
+            return data[0]
     return None
 
 # Function to get all vendors
@@ -72,87 +75,92 @@ def delete_filament(filament_id):
     response = requests.delete(url)
     return response
 
-# Function to merge colors safely
-def merge_colors(filament, new_color):
-    if not any(color['name'] == new_color['name'] for color in filament["colors"]):
-        filament["colors"].append(new_color)
-
 # Function to create vendors and filaments
 def create_data():
     # URL to fetch the JSON data
     data_url = "https://donkie.github.io/SpoolmanDB/filaments.json"
 
     # Fetch the data from the provided URL
-    response = requests.get(data_url)
-    response.raise_for_status()  # Check if the request was successful
-    data = response.json()
+    print("Fetching filament data from SpoolmanDB...")
+    try:
+        response = requests.get(data_url)
+        response.raise_for_status()  # Check if the request was successful
+        filaments_data = response.json()
+        print(f"Found {len(filaments_data)} filament definitions.")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching filament data from source URL: {e}")
+        return
 
-    # Extract the filaments from the data
-    filaments = data
+    # --- Vendor Processing ---
+    print("Processing vendors...")
+    # Get all unique manufacturer names from the data
+    required_vendors = {item["manufacturer"] for item in filaments_data if "manufacturer" in item}
 
-    # Create all vendors first
-    vendor_creation_results = {"created": 0, "exists": 0}
-    for item in filaments:
-        manufacturer_name = item["manufacturer"]
+    # Get all existing vendors from Spoolman
+    try:
+        existing_vendors_list = get_vendors()
+        existing_vendor_names = {vendor['name'] for vendor in existing_vendors_list}
+        print(f"Found {len(existing_vendor_names)} existing vendors in Spoolman.")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching vendors from Spoolman: {e}")
+        return
 
-        # Check if the vendor exists
-        existing_vendor = get_vendor_by_name(manufacturer_name)
-        if existing_vendor:
-            vendor_id = existing_vendor["id"]
-            vendor_creation_results["exists"] += 1
-        else:
-            response = create_vendor(manufacturer_name)
+    # Determine which vendors need to be created
+    vendors_to_create = required_vendors - existing_vendor_names
+
+    # Create all missing vendors
+    vendor_creation_results = {"created": 0, "failed": 0}
+    if vendors_to_create:
+        print(f"Creating {len(vendors_to_create)} new vendors...")
+        for vendor_name in vendors_to_create:
+            response = create_vendor(vendor_name)
             if response.status_code == 200:
-                vendor_data = response.json()
-                vendor_id = vendor_data["id"]
                 vendor_creation_results["created"] += 1
             else:
-                print(f"Failed to create vendor: {manufacturer_name}. Status code: {response.status_code}, Error: {response.text}")
+                vendor_creation_results["failed"] += 1
+                print(f"Failed to create vendor: {vendor_name}. Status code: {response.status_code}, Error: {response.text}")
 
-    # Output vendor creation summary
-    print(f"Vendor creation summary: {vendor_creation_results['created']} created, {vendor_creation_results['exists']} already existed")
+    print(f"Vendor creation summary: {vendor_creation_results['created']} created, {len(existing_vendor_names)} already existed, {vendor_creation_results['failed']} failed.")
 
-    # Refresh the list of existing vendors
-    vendors = get_vendors()
-    existing_vendors = {vendor['name']: vendor for vendor in vendors}
+    # Refresh the list of vendors to get IDs for all
+    try:
+        all_vendors_list = get_vendors()
+        vendor_map = {vendor['name']: vendor['id'] for vendor in all_vendors_list}
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching vendors from Spoolman after creation: {e}")
+        return
 
-    # Process and format the filaments
-    filament_creation_results = {"created": 0, "merged": 0}
-    for item in filaments:
-        manufacturer_name = item["manufacturer"]
-        vendor_id = existing_vendors[manufacturer_name]["id"]
+    # --- Filament Processing ---
+    print("Processing filaments...")
+    filament_results = {"created": 0, "skipped": 0, "failed": 0}
+    for item in filaments_data:
+        filament_name = item.get("name")
+        if not filament_name:
+            continue  # Skip items without a name
 
-        filament_name = item["name"]
-        existing_filament = get_filament_by_name(filament_name)
-        if existing_filament:
-            filament_creation_results["merged"] += 1
-            # Merge colors for the existing filament
-            for color in item.get("colors", []):
-                merge_colors(existing_filament, {
-                    "name": color["name"],
-                    "hex": color["color_hex"]
-                })
+        # Check if the filament already exists
+        if get_filament_by_name(filament_name):
+            filament_results["skipped"] += 1
             continue
 
-        # Ensure diameters are correctly formatted and not missing
-        diameters = item.get("diameter")
-        if not diameters:
+        # Get vendor ID from our map
+        manufacturer_name = item.get("manufacturer")
+        if not manufacturer_name or manufacturer_name not in vendor_map:
+            print(f"Skipping filament '{filament_name}' because its vendor '{manufacturer_name}' was not found or created.")
+            filament_results["failed"] += 1
             continue
 
-        try:
-            diameters = [float(diameters)] if isinstance(diameters, (int, float)) else [float(d) for d in diameters]
-        except ValueError:
-            continue
+        vendor_id = vendor_map[manufacturer_name]
 
         # Ensure spool_weight is greater than 0
-        spool_weight = item.get("spool_weight", 1)  # Default to 1 if not provided or invalid
-        if spool_weight <= 0:
+        spool_weight = item.get("spool_weight", 1)
+        if not isinstance(spool_weight, (int, float)) or spool_weight <= 0:
             spool_weight = 1
 
         filament = {
             "name": filament_name,
             "material": item.get("material"),
-            "density": item.get("density", 1.0),
+            "density": item.get("density", 1.23),  # Common PLA density as a fallback
             "weight": item.get("weight", 0),
             "spool_weight": spool_weight,
             "diameter": item.get("diameter", 1.75),
@@ -160,42 +168,51 @@ def create_data():
             "settings_bed_temp": item.get("bed_temp", 60),
             "color_hex": item.get("color_hex"),
             "external_id": item.get("id"),
-            "vendor_id": vendor_id  # Use the vendor_id from the created vendor
+            "vendor_id": vendor_id
         }
 
         # Send the POST request to create the filament
         response = create_filament(filament)
         if response.status_code == 200:
-            filament_creation_results["created"] += 1
+            filament_results["created"] += 1
+        else:
+            filament_results["failed"] += 1
+            print(f"Failed to create filament '{filament_name}'. Status: {response.status_code}, Error: {response.text}")
 
-    # Output filament creation summary
-    print(f"Filament creation summary: {filament_creation_results['created']} created, {filament_creation_results['merged']} merged")
-
-    print("All filaments processed.")
+    print(f"Filament processing summary: {filament_results['created']} created, {filament_results['skipped']} skipped (already existed), {filament_results['failed']} failed.")
+    print("All data processed.")
 
 # Function to delete all vendors and filaments
 def delete_all_data():
     # Fetch and delete all filaments
-    filaments = get_filaments()
-    for filament in filaments:
-        filament_id = filament['id']
-        response = delete_filament(filament_id)
-        if response.status_code == 204:
-            print(f"Successfully deleted filament: {filament['name']} (ID: {filament_id})")
-        else:
-            print(f"Failed to delete filament: {filament['name']} (ID: {filament_id}). Status code: {response.status_code}, Error: {response.text}")
+    try:
+        filaments = get_filaments()
+        print(f"Found {len(filaments)} filaments to delete.")
+        for filament in filaments:
+            filament_id = filament['id']
+            response = delete_filament(filament_id)
+            if response.status_code == 204:
+                print(f"Successfully deleted filament: {filament['name']} (ID: {filament_id})")
+            else:
+                print(f"Failed to delete filament: {filament['name']} (ID: {filament_id}). Status code: {response.status_code}, Error: {response.text}")
+    except requests.exceptions.RequestException as e:
+        print(f"Could not fetch filaments to delete: {e}")
 
     # Fetch and delete all vendors
-    vendors = get_vendors()
-    for vendor in vendors:
-        vendor_id = vendor['id']
-        response = delete_vendor(vendor_id)
-        if response.status_code == 204:
-            print(f"Successfully deleted vendor: {vendor['name']} (ID: {vendor_id})")
-        else:
-            print(f"Failed to delete vendor: {vendor['name']} (ID: {vendor_id}). Status code: {response.status_code}, Error: {response.text}")
+    try:
+        vendors = get_vendors()
+        print(f"Found {len(vendors)} vendors to delete.")
+        for vendor in vendors:
+            vendor_id = vendor['id']
+            response = delete_vendor(vendor_id)
+            if response.status_code == 204:
+                print(f"Successfully deleted vendor: {vendor['name']} (ID: {vendor_id})")
+            else:
+                print(f"Failed to delete vendor: {vendor['name']} (ID: {vendor_id}). Status code: {response.status_code}, Error: {response.text}")
+    except requests.exceptions.RequestException as e:
+        print(f"Could not fetch vendors to delete: {e}")
 
-    print("All vendors and filaments deleted.")
+    print("Deletion process finished.")
 
 # Main function to parse CLI arguments and execute the appropriate function
 def main():
