@@ -203,13 +203,22 @@ def delete_all_data():
 # Main function to parse CLI arguments and execute the appropriate function
 def main():
     parser = argparse.ArgumentParser(description="Manage Spoolman data.")
-    parser.add_argument("action", choices=["create", "delete"], help="Action to perform: 'create' to add data, 'delete' to remove data")
+    parser.add_argument(
+        "action",
+        choices=["create", "delete", "replace"],
+        help="Action to perform: 'create' to add new data, 'delete' to remove all data, 'replace' to do a full delete and then create."
+    )
     args = parser.parse_args()
 
     if args.action == "create":
         create_data()
     elif args.action == "delete":
         delete_all_data()
+    elif args.action == "replace":
+        print("Replacing all data. This will first delete all existing filaments and vendors.")
+        delete_all_data()
+        print("\nDeletion complete. Now creating new data.")
+        create_data()
 
 if __name__ == "__main__":
     main()
