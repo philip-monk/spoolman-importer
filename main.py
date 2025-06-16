@@ -94,7 +94,7 @@ def create_data():
         print(f"Creating {len(vendors_to_create)} new vendors...")
         for vendor_name in vendors_to_create:
             response = create_vendor(vendor_name)
-            if response.ok:
+            if 200 <= response.status_code < 300:
                 vendor_creation_results["created"] += 1
             else:
                 vendor_creation_results["failed"] += 1
@@ -162,7 +162,7 @@ def create_data():
 
         # Send the POST request to create the filament
         response = create_filament(filament)
-        if response.ok:
+        if 200 <= response.status_code < 300:
             filament_results["created"] += 1
         else:
             filament_results["failed"] += 1
@@ -180,7 +180,7 @@ def delete_all_data():
         for filament in filaments:
             filament_id = filament['id']
             response = delete_filament(filament_id)
-            if response.ok:
+            if 200 <= response.status_code < 300:
                 print(f"Successfully deleted filament: {filament['name']} (ID: {filament_id})")
             else:
                 print(f"Failed to delete filament: {filament['name']} (ID: {filament_id}). Status code: {response.status_code}, Error: {response.text}")
@@ -194,7 +194,7 @@ def delete_all_data():
         for vendor in vendors:
             vendor_id = vendor['id']
             response = delete_vendor(vendor_id)
-            if response.ok:
+            if 200 <= response.status_code < 300:
                 print(f"Successfully deleted vendor: {vendor['name']} (ID: {vendor_id})")
             else:
                 print(f"Failed to delete vendor: {vendor['name']} (ID: {vendor_id}). Status code: {response.status_code}, Error: {response.text}")
