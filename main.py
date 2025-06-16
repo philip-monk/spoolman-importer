@@ -29,26 +29,6 @@ def create_vendor(vendor_name):
     response = requests.post(url, headers=headers, data=json.dumps(vendor))
     return response
 
-# Function to get a vendor by name
-def get_vendor_by_name(vendor_name):
-    url = f"{spoolman_url}/api/v1/vendor"
-    response = requests.get(url, params={"name": vendor_name})
-    if response.status_code == 200:
-        data = response.json()
-        if data:  # Check if the list is not empty
-            return data[0]
-    return None
-
-# Function to get a filament by name
-def get_filament_by_name(filament_name):
-    url = f"{spoolman_url}/api/v1/filament"
-    response = requests.get(url, params={"name": filament_name})
-    if response.status_code == 200:
-        data = response.json()
-        if data:  # Check if the list is not empty
-            return data[0]
-    return None
-
 # Function to get all vendors
 def get_vendors():
     url = f"{spoolman_url}/api/v1/vendor"
@@ -132,14 +112,23 @@ def create_data():
 
     # --- Filament Processing ---
     print("Processing filaments...")
+    # Get all existing filaments from Spoolman for an efficient check
+    try:
+        existing_filaments_list = get_filaments()
+        existing_filament_names = {f['name'] for f in existing_filaments_list}
+        print(f"Found {len(existing_filament_names)} existing filaments in Spoolman.")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching filaments from Spoolman: {e}")
+        return
+
     filament_results = {"created": 0, "skipped": 0, "failed": 0}
     for item in filaments_data:
         filament_name = item.get("name")
         if not filament_name:
             continue  # Skip items without a name
 
-        # Check if the filament already exists
-        if get_filament_by_name(filament_name):
+        # Check if the filament already exists using the pre-fetched set
+        if filament_name in existing_filament_names:
             filament_results["skipped"] += 1
             continue
 
